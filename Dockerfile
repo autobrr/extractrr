@@ -1,11 +1,28 @@
 FROM golang:1.24-bookworm AS build-stage
-#RUN apt-get update && apt-get install libudfread0 libudfread-dev pkg-config -y
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    automake \
+    autoconf \
+    libtool \
+    pkg-config \
+    git
+
+# Build libudfread from source with static library
+WORKDIR /tmp
+RUN git clone https://code.videolan.org/videolan/libudfread.git && \
+    cd libudfread && \
+    ./bootstrap && \
+    ./configure --prefix=/usr --enable-static --disable-shared && \
+    make && \
+    make install
+
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . ./
-RUN dpkg -i deps/*.deb
 
 RUN go build -a -tags netgo -ldflags '-w -extldflags "-static"' -o bin/extractrr ./cmd/extractrr/main.go
 

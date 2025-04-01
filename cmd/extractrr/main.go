@@ -15,7 +15,7 @@ import (
 )
 
 /*
-#cgo pkg-config: udfread
+#cgo pkg-config: libudfread
 #include <stdlib.h>
 #include <udfread/udfread.h>
 */
