@@ -4,7 +4,9 @@ A tool to extract iso files to disk without mounting.
 
 ## Build
 
-go build -o iso-extract main.go
+The easiest way to build this is with docker using the Dockerfile and either call `make build-docker` or `./build.sh`.
+
+It includes an extra debian package `libudfread` which is copied into the container during build.
 
 ## Usage
 
