@@ -1,4 +1,5 @@
 # .goreleaser.yml
+version: 2
 project_name: extractrr
 
 # This is the important part - tell GoReleaser not to build the binaries
