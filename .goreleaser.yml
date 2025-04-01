@@ -4,16 +4,28 @@ project_name: extractrr
 
 # This is the important part - tell GoReleaser not to build the binaries
 builds:
-  - skip: true
+  - env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+    flags:
+      - -a
+      - -tags=netgo
+    ldflags:
+      - -w
+      - -extldflags "-static"
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .CommitDate }}
+    buildmode: c-archive
+    main: ./cmd/extractrr/main.go
 
 # Use the pre-built binaries
 archives:
   - id: extractrr
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - src: ./out/extractrr
-        dst: extractrr
-        strip_parent: true
 
 checksum:
   name_template: 'checksums.txt'
