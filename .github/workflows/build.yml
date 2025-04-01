@@ -30,35 +30,51 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up build variables
-        id: vars
-        run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          echo "COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
-
-      - name: Build binary with build args
-        run: |
-          DOCKER_BUILDKIT=1 docker build \
-            --file Dockerfile \
-            --output out \
-            --build-arg VERSION=${{ steps.vars.outputs.VERSION }} \
-            --build-arg COMMIT=${{ steps.vars.outputs.COMMIT }} \
-            --build-arg BUILDTIME=${{ steps.vars.outputs.BUILD_TIME }} \
-            .
-
-      - name: Upload binary
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+      - name: Set up Go
+        uses: actions/setup-go@v4
         with:
-          name: extractrr
-          path: out/extractrr
+          go-version: '1.24'
+          cache: true
 
-      - name: Run GoReleaser
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential automake autoconf libtool pkg-config git
+
+      - name: Build libudfread
+        run: |
+          cd /tmp
+          git clone https://code.videolan.org/videolan/libudfread.git
+          cd libudfread
+          ./bootstrap
+          ./configure --prefix=/usr --enable-static --disable-shared
+          make
+          sudo make install
+
+      - name: Build with GoReleaser
+        uses: goreleaser/goreleaser-action@v4
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --snapshot --skip=validate,publish --parallelism 5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish with GoReleaser
         uses: goreleaser/goreleaser-action@v4
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          version: latest
-          args: release --skip=validate
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: extractrr
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
