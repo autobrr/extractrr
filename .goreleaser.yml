@@ -19,7 +19,6 @@ builds:
       - -X main.version={{ .Version }}
       - -X main.commit={{ .Commit }}
       - -X main.date={{ .CommitDate }}
-    buildmode: c-archive
     main: ./cmd/extractrr/main.go
 
 # Use the pre-built binaries
