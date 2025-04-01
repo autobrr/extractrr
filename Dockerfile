@@ -1,5 +1,9 @@
 FROM golang:1.24-bookworm AS build-stage
 
+ARG VERSION=dev
+ARG REVISION=dev
+ARG BUILDTIME
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -24,7 +28,7 @@ RUN go mod download
 
 COPY . ./
 
-RUN go build -a -tags netgo -ldflags '-w -extldflags "-static"' -o bin/extractrr ./cmd/extractrr/main.go
+RUN go build -a -tags netgo -ldflags '-w -extldflags "-static" -X main.version=${VERSION} -X main.commit=${REVISION} -X main.date=${BUILDTIME}' -o bin/extractrr ./cmd/extractrr/main.go
 
 FROM scratch AS export-stage
 COPY --from=build-stage /src/bin/ .
