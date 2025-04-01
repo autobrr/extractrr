@@ -24,7 +24,14 @@ RUN go mod download
 
 COPY . ./
 
-RUN go build -a -tags netgo -ldflags '-w -extldflags "-static"' -o bin/extractrr ./cmd/extractrr/main.go
+ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILDTIME
+
+# Use these args in your build
+RUN echo "Building version ${VERSION} commit ${COMMIT} at ${BUILDTIME}"
+
+RUN go build -a -tags netgo -ldflags "-w -extldflags \"-static\" -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILDTIME}" -o bin/extractrr ./cmd/extractrr/main.go
 
 FROM scratch AS export-stage
 COPY --from=build-stage /src/bin/ .

@@ -22,6 +22,12 @@ import (
 import "C"
 import "unsafe"
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 // Job represents a file extraction task
 type Job struct {
 	SrcPath string
@@ -39,10 +45,23 @@ Documentation is available at https://github.com/autobrr/extractrr`,
 	}
 
 	rootCmd.AddCommand(CommandExtract())
+	rootCmd.AddCommand(CommandVersion())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func CommandVersion() *cobra.Command {
+	var command = &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(c *cobra.Command, args []string) {
+			fmt.Printf("extractrr %s (%s, %s)\n", version, commit, date)
+		},
+	}
+
+	return command
 }
 
 func CommandExtract() *cobra.Command {

@@ -1,0 +1,64 @@
+name: Build and release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+    tags:
+      - "v*"
+    paths-ignore:
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/images/**"
+      - "**.md"
+  pull_request:
+    paths-ignore:
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/images/**"
+      - "**.md"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up build variables
+        id: vars
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+      - name: Build binary with build args
+        run: |
+          DOCKER_BUILDKIT=1 docker build \
+            --file Dockerfile \
+            --output out \
+            --build-arg VERSION=${{ steps.vars.outputs.VERSION }} \
+            --build-arg COMMIT=${{ steps.vars.outputs.COMMIT }} \
+            --build-arg BUILDTIME=${{ steps.vars.outputs.BUILD_TIME }} \
+            .
+
+      - name: Upload binary
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: extractrr
+          path: out/extractrr
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          version: latest
+          args: release --skip-validate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

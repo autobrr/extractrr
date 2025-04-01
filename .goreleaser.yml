@@ -1,0 +1,38 @@
+# .goreleaser.yml
+project_name: extractrr
+
+# This is the important part - tell GoReleaser not to build the binaries
+builds:
+  - skip: true
+
+# Use the pre-built binaries
+archives:
+  - id: extractrr
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: ./out/extractrr
+        dst: extractrr
+        strip_parent: true
+
+checksum:
+  name_template: 'checksums.txt'
+
+release:
+  prerelease: auto
+  footer: |
+    **Full Changelog**: https://github.com/autobrr/extractrr/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+    ## What to do next?
+
+    - Join our [Discord server](https://discord.gg/WQ2eUycxyT)
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
