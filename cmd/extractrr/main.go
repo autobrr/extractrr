@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cheggaaa/pb/v3"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 
@@ -101,7 +102,7 @@ func CommandExtract() *cobra.Command {
 			return fmt.Errorf("failed to scan ISO: %w", err)
 		}
 
-		log.Printf("Found %d files with total size of %.2f GB", fileCount, float64(totalSize)/(1024*1024*1024))
+		log.Printf("Found %d files with total size of %s", fileCount, humanize.IBytes(uint64(totalSize)))
 
 		// Create worker pool and job channel
 		jobChan := make(chan Job, fileCount)
@@ -111,7 +112,7 @@ func CommandExtract() *cobra.Command {
 		var bar *pb.ProgressBar
 		if *showProgress {
 			bar = pb.Full.Start64(totalSize)
-			defer bar.Finish()
+			bar.Set(pb.Bytes, true)
 		}
 
 		// Progress tracking
@@ -170,11 +171,19 @@ func CommandExtract() *cobra.Command {
 		wg.Wait()
 		close(progressChan)
 
+		if bar != nil {
+			bar.SetCurrent(totalSize)
+			bar.Finish()
+		}
+
 		duration := time.Since(startTime)
+
 		log.Printf("Extraction completed in %v", duration)
-		if totalSize > 0 {
-			speedMBps := float64(totalSize) / (1024 * 1024) / duration.Seconds()
-			log.Printf("Average speed: %.2f MB/s", speedMBps)
+		if totalSize > 0 && duration.Seconds() > 0 {
+			speedBytesPerSec := float64(totalSize) / duration.Seconds()
+			log.Printf("Average speed: %s/s", humanize.IBytes(uint64(speedBytesPerSec)))
+		} else if totalSize > 0 {
+			log.Printf("Average speed: N/A (extraction too fast)")
 		}
 
 		return nil

@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/cheggaaa/pb/v3 v3.1.7
+	github.com/dustin/go-humanize v1.0.1
 	github.com/spf13/cobra v1.9.1
 )
 
