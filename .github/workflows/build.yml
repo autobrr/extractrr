@@ -44,7 +44,7 @@ jobs:
             --output out \
             --build-arg VERSION=${{ steps.vars.outputs.VERSION }} \
             --build-arg COMMIT=${{ steps.vars.outputs.COMMIT }} \
-            --build-arg BUILD_TIME=${{ steps.vars.outputs.BUILD_TIME }} \
+            --build-arg BUILDTIME=${{ steps.vars.outputs.BUILD_TIME }} \
             .
 
       - name: Upload binary
