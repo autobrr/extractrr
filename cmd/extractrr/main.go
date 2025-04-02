@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blang/semver"
 	"github.com/cheggaaa/pb/v3"
+	"github.com/creativeprojects/go-selfupdate"
 	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
@@ -46,6 +48,7 @@ Documentation is available at https://github.com/autobrr/extractrr`,
 
 	rootCmd.AddCommand(CommandExtract())
 	rootCmd.AddCommand(CommandVersion())
+	rootCmd.AddCommand(CommandUpdate())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -58,6 +61,58 @@ func CommandVersion() *cobra.Command {
 		Short: "Print version information",
 		Run: func(c *cobra.Command, args []string) {
 			fmt.Printf("extractrr %s (%s, %s)\n", version, commit, date)
+		},
+	}
+
+	return command
+}
+
+func CommandUpdate() *cobra.Command {
+	var command = &cobra.Command{
+		Use:   "update",
+		Short: "Update extractrr to the latest version",
+		Long:  "Update extractrr to the latest version from GitHub releases",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// If version is in dev mode, skip update
+			if version == "dev" {
+				fmt.Println("Cannot update development version")
+				return nil
+			}
+
+			fmt.Printf("Current version: %s\n", version)
+			fmt.Println("Checking for updates...")
+
+			// Parse current version with semver for comparison
+			_, err := semver.ParseTolerant(version)
+			if err != nil {
+				return fmt.Errorf("could not parse version: %w", err)
+			}
+
+			latest, found, err := selfupdate.DetectLatest(cmd.Context(), selfupdate.ParseSlug("autobrr/extractrr"))
+			if err != nil {
+				return fmt.Errorf("error occurred while detecting version: %w", err)
+			}
+			if !found {
+				return fmt.Errorf("latest version for %s/%s could not be found from github repository", "autobrr/extractrr", version)
+			}
+
+			if latest.LessOrEqual(version) {
+				fmt.Printf("Current binary is the latest version: %s\n", version)
+				return nil
+			}
+
+			exe, err := selfupdate.ExecutablePath()
+			if err != nil {
+				return fmt.Errorf("could not locate executable path: %w", err)
+			}
+
+			if err := selfupdate.UpdateTo(cmd.Context(), latest.AssetURL, latest.AssetName, exe); err != nil {
+				return fmt.Errorf("error occurred while updating binary: %w", err)
+			}
+
+			fmt.Printf("Successfully updated to version: %s\n", latest.Version())
+
+			return nil
 		},
 	}
 
