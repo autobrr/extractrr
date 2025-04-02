@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,9 +122,10 @@ func CommandUpdate() *cobra.Command {
 
 func CommandExtract() *cobra.Command {
 	var command = &cobra.Command{
-		Use:     "extract",
-		Short:   "Extract iso to directory",
-		Example: `  extractrr extract /path/to/file.iso /path/to/export`,
+		Use:   "extract",
+		Short: "Extract iso to directory",
+		Example: `  extractrr extract /path/to/file.iso /path/to/export
+  extractrr extract "/path/to/*.iso" /path/to/export`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
 				return fmt.Errorf("requires two args")
@@ -139,131 +141,168 @@ func CommandExtract() *cobra.Command {
 	)
 
 	command.RunE = func(c *cobra.Command, args []string) error {
-		isoFile := args[0]
-		extractDir := args[1]
+		pattern := args[0]
+		extractBaseDir := args[1]
 
-		startTime := time.Now()
-
-		// Ensure extract directory exists
-		if err := os.MkdirAll(extractDir, 0755); err != nil {
-			return fmt.Errorf("failed to create extract directory: %w", err)
-		}
-
-		log.Printf("Initializing UDF reader for %s...", isoFile)
-		// Open UDF filesystem
-		cIsoPath := C.CString(isoFile)
-		defer C.free(unsafe.Pointer(cIsoPath))
-
-		udf := C.udfread_init()
-		if udf == nil {
-			return fmt.Errorf("failed to initialize UDF reader")
-		}
-		defer C.udfread_close(udf)
-
-		if C.udfread_open(udf, cIsoPath) != 0 {
-			return fmt.Errorf("failed to open ISO file: %s", isoFile)
-		}
-
-		// First pass: scan the ISO structure to gather file info
-		// This helps with showing progress and planning extraction
-		log.Printf("Scanning ISO structure...")
-		var totalSize int64
-		var fileCount int
-		jobs := make([]Job, 0)
-
-		err := scanISOStructure(udf, "/", extractDir, &jobs, &totalSize, &fileCount)
+		// Expand the glob pattern to get all matching files
+		matches, err := filepath.Glob(pattern)
 		if err != nil {
-			return fmt.Errorf("failed to scan ISO: %w", err)
+			return fmt.Errorf("invalid glob pattern: %w", err)
 		}
 
-		log.Printf("Found %d files with total size of %s", fileCount, humanize.IBytes(uint64(totalSize)))
-
-		// Create worker pool and job channel
-		jobChan := make(chan Job, fileCount)
-		var wg sync.WaitGroup
-
-		// Setup progress bar if enabled
-		var bar *pb.ProgressBar
-		if *showProgress {
-			bar = pb.Full.Start64(totalSize)
-			bar.Set(pb.Bytes, true)
+		if len(matches) == 0 {
+			return fmt.Errorf("no files found matching pattern: %s", pattern)
 		}
 
-		// Progress tracking
-		progressChan := make(chan int64)
-		go func() {
-			var processedSize int64
-			for size := range progressChan {
-				processedSize += size
-				if bar != nil {
-					bar.SetCurrent(processedSize)
-				}
+		// If only one file matches, use the exact extractDir provided
+		if len(matches) == 1 {
+			return extractISO(matches[0], extractBaseDir, *numWorkers, *bufferSize, *showProgress)
+		}
+
+		// Multiple files matched the pattern
+		log.Printf("Found %d files matching the pattern", len(matches))
+
+		// Process each file in sequence
+		for _, isoFile := range matches {
+			// For multiple files, create subdirectories based on filename
+			baseName := filepath.Base(isoFile)
+			fileNameWithoutExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+			fileExtractDir := filepath.Join(extractBaseDir, fileNameWithoutExt)
+
+			log.Printf("Processing %s -> %s", isoFile, fileExtractDir)
+			if err := extractISO(isoFile, fileExtractDir, *numWorkers, *bufferSize, *showProgress); err != nil {
+				// Log error but continue with next file
+				log.Printf("Error extracting %s: %v", isoFile, err)
 			}
-		}()
-
-		// Start worker goroutines
-		for i := 0; i < *numWorkers; i++ {
-			wg.Add(1)
-			go func(id int) {
-				defer wg.Done()
-
-				// Each worker gets its own UDF handle to avoid concurrency issues
-				workerUdf := C.udfread_init()
-				if workerUdf == nil {
-					log.Printf("Worker %d: Failed to initialize UDF reader", id)
-					return
-				}
-				defer C.udfread_close(workerUdf)
-
-				cWorkerIsoPath := C.CString(isoFile)
-				defer C.free(unsafe.Pointer(cWorkerIsoPath))
-
-				if C.udfread_open(workerUdf, cWorkerIsoPath) != 0 {
-					log.Printf("Worker %d: Failed to open ISO file", id)
-					return
-				}
-
-				buffer := make([]byte, *bufferSize)
-
-				for job := range jobChan {
-					err := extractFile(workerUdf, job.SrcPath, job.DstPath, buffer, progressChan)
-					if err != nil {
-						log.Printf("Error extracting %s: %v", job.SrcPath, err)
-					}
-				}
-			}(i)
-		}
-
-		// Submit jobs to the pool
-		log.Printf("Starting extraction with %d workers...", *numWorkers)
-		for _, job := range jobs {
-			jobChan <- job
-		}
-		close(jobChan)
-
-		// Wait for all workers to complete
-		wg.Wait()
-		close(progressChan)
-
-		if bar != nil {
-			bar.SetCurrent(totalSize)
-			bar.Finish()
-		}
-
-		duration := time.Since(startTime)
-
-		log.Printf("Extraction completed in %v", duration)
-		if totalSize > 0 && duration.Seconds() > 0 {
-			speedBytesPerSec := float64(totalSize) / duration.Seconds()
-			log.Printf("Average speed: %s/s", humanize.IBytes(uint64(speedBytesPerSec)))
-		} else if totalSize > 0 {
-			log.Printf("Average speed: N/A (extraction too fast)")
 		}
 
 		return nil
 	}
 
 	return command
+}
+
+// extractISO handles the extraction of a single ISO file to a target directory
+func extractISO(isoFile, extractDir string, numWorkers int, bufferSize int, showProgress bool) error {
+	startTime := time.Now()
+
+	// Ensure extract directory exists
+	if err := os.MkdirAll(extractDir, 0755); err != nil {
+		return fmt.Errorf("failed to create extract directory: %w", err)
+	}
+
+	log.Printf("Initializing UDF reader for %s...", isoFile)
+	// Open UDF filesystem
+	cIsoPath := C.CString(isoFile)
+	defer C.free(unsafe.Pointer(cIsoPath))
+
+	udf := C.udfread_init()
+	if udf == nil {
+		return fmt.Errorf("failed to initialize UDF reader")
+	}
+	defer C.udfread_close(udf)
+
+	if C.udfread_open(udf, cIsoPath) != 0 {
+		return fmt.Errorf("failed to open ISO file: %s", isoFile)
+	}
+
+	// First pass: scan the ISO structure to gather file info
+	// This helps with showing progress and planning extraction
+	log.Printf("Scanning ISO structure...")
+	var totalSize int64
+	var fileCount int
+	jobs := make([]Job, 0)
+
+	err := scanISOStructure(udf, "/", extractDir, &jobs, &totalSize, &fileCount)
+	if err != nil {
+		return fmt.Errorf("failed to scan ISO: %w", err)
+	}
+
+	log.Printf("Found %d files with total size of %s", fileCount, humanize.IBytes(uint64(totalSize)))
+
+	// Create worker pool and job channel
+	jobChan := make(chan Job, fileCount)
+	var wg sync.WaitGroup
+
+	// Setup progress bar if enabled
+	var bar *pb.ProgressBar
+	if showProgress {
+		bar = pb.Full.Start64(totalSize)
+		bar.Set(pb.Bytes, true)
+	}
+
+	// Progress tracking
+	progressChan := make(chan int64)
+	go func() {
+		var processedSize int64
+		for size := range progressChan {
+			processedSize += size
+			if bar != nil {
+				bar.SetCurrent(processedSize)
+			}
+		}
+	}()
+
+	// Start worker goroutines
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			// Each worker gets its own UDF handle to avoid concurrency issues
+			workerUdf := C.udfread_init()
+			if workerUdf == nil {
+				log.Printf("Worker %d: Failed to initialize UDF reader", id)
+				return
+			}
+			defer C.udfread_close(workerUdf)
+
+			cWorkerIsoPath := C.CString(isoFile)
+			defer C.free(unsafe.Pointer(cWorkerIsoPath))
+
+			if C.udfread_open(workerUdf, cWorkerIsoPath) != 0 {
+				log.Printf("Worker %d: Failed to open ISO file", id)
+				return
+			}
+
+			buffer := make([]byte, bufferSize)
+
+			for job := range jobChan {
+				err := extractFile(workerUdf, job.SrcPath, job.DstPath, buffer, progressChan)
+				if err != nil {
+					log.Printf("Error extracting %s: %v", job.SrcPath, err)
+				}
+			}
+		}(i)
+	}
+
+	// Submit jobs to the pool
+	log.Printf("Starting extraction with %d workers...", numWorkers)
+	for _, job := range jobs {
+		jobChan <- job
+	}
+	close(jobChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+	close(progressChan)
+
+	if bar != nil {
+		bar.SetCurrent(totalSize)
+		bar.Finish()
+	}
+
+	duration := time.Since(startTime)
+
+	log.Printf("Extraction completed in %v", duration)
+	if totalSize > 0 && duration.Seconds() > 0 {
+		speedBytesPerSec := float64(totalSize) / duration.Seconds()
+		log.Printf("Average speed: %s/s", humanize.IBytes(uint64(speedBytesPerSec)))
+	} else if totalSize > 0 {
+		log.Printf("Average speed: N/A (extraction too fast)")
+	}
+
+	return nil
 }
 
 // scanISOStructure recursively scans the ISO structure and builds a list of files to extract
